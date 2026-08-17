@@ -1,0 +1,17 @@
+{
+  "config": {
+    "title": "Mimo 语音识别",
+    "step": {
+      "user": {
+        "title": "Mimo Speech-To-Text",
+        "description": "请输入您的 Mimo API Key",
+        "data": {
+          "api_key": "API Key"
+        }
+      }
+    },
+    "abort": {
+      "single_instance_allowed": "只允许建立一个实例"
+    }
+  }
+}
