@@ -3,10 +3,10 @@
   "name": "Mimo Speech-To-Text",
   "config_flow": true,
   "version": "1.0.0",
-  "codeowners": ["@your-github"],
-  "documentation": "https://mimo.mi.com/docs/zh-CN/quick-start/usage-guide/audio/Speech-Recognition",
+  "codeowners": ["@ly2199"],
+  "documentation": "https://github.com/ly2199/ha_mimo_asr",
   "iot_class": "cloud_push",
-  "issue_tracker": "https://github.com/your-repo/mimo_asr/issues",
+  "issue_tracker": "https://github.com/ly2199/ha_mimo_asr/issues",
   "requirements": ["openai>=1.0.0"],
   "dependencies": ["stt"],
   "after_dependencies": ["assist_pipeline"]
