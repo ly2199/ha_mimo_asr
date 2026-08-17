@@ -80,9 +80,7 @@ class MimoASR(SpeechToTextEntity):
     @property
     def supported_formats(self) -> list[AudioFormats]:
         """Return a list of supported formats."""
-        # Mimo 支持 WAV 和 MP3
-        return [AudioFormats.WAV, AudioFormats.MP3]
-
+        return [AudioFormats.WAV]  # 只返回 WAV 格式
     @property
     def supported_codecs(self) -> list[AudioCodecs]:
         """Return a list of supported codecs."""
