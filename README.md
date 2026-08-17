@@ -2,7 +2,10 @@
 
 [![hacs_badge](https://img.shields.io/badge/HACS-Custom-41BDF5.svg)](https://github.com/hacs/integration)
 [![ha_version](https://img.shields.io/badge/Home%20Assistant-2024.1+-blue.svg)](https://www.home-assistant.io/)
+<<<<<<< HEAD
 [![GitHub release](https://img.shields.io/github/v/release/ly2199/ha_mimo_asr)](https://github.com/ly2199/ha_mimo_asr/releases)
+=======
+>>>>>>> origin/main
 
 使用 Mimo ASR 服务为 Home Assistant 提供语音识别（STT）能力，让您的语音助手更智能、更精准。
 
@@ -25,7 +28,11 @@
 
 1. 确保你已经安装了 [HACS](https://hacs.xyz/)。
 2. 在 HACS 中点击右上角菜单 → **Custom repositories**。
+<<<<<<< HEAD
 3. 添加仓库地址：`https://github.com/ly2199/ha_mimo_asr`，类别选择 **Integration**。
+=======
+3. 添加仓库地址：`https://github.com/你的用户名/mimo_asr`，类别选择 **Integration**。
+>>>>>>> origin/main
 4. 点击 **Install** 安装。
 5. 重启 Home Assistant。
 
@@ -41,6 +48,11 @@
 3. 输入你的 **API Key**（从 Mimo 平台获取）。
 4. 点击确认，完成配置。
 
+<<<<<<< HEAD
+=======
+![配置截图](https://via.placeholder.com/800x400?text=配置界面示例)
+
+>>>>>>> origin/main
 > 目前只支持单个实例，重复添加会被拦截。
 
 ## 🗣️ 在语音助手中使用
