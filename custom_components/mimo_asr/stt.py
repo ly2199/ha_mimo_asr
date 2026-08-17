@@ -54,8 +54,7 @@ class MimoASR(SpeechToTextEntity):
         self._config_entry = config_entry
         self._api_key: str = config_entry.data[CONF_API_KEY]
 
-        # 不在 __init__ 中初始化 AsyncOpenAI，避免阻塞事件循环
-        # 客户端将在 _get_client() 中延迟初始化
+        # 延迟初始化客户端以避免阻塞事件循环
         self._client: AsyncOpenAI | None = None
 
         self._attr_name = "Mimo Speech to Text"
@@ -64,20 +63,7 @@ class MimoASR(SpeechToTextEntity):
         _LOGGER.debug("Mimo ASR entity initialized")
 
     def _get_client(self) -> AsyncOpenAI:
-        """获取或创建 AsyncOpenAI 客户端。
-        
-        客户端在第一次调用时创建，后续复用。
-        注意：此方法应在 async 上下文中调用，但 AsyncOpenAI 的初始化
-        本身是同步的，会触发 load_verify_locations 阻塞调用。
-        但由于我们是在 async_process_audio_stream 中调用，
-        Home Assistant 会检测到阻塞调用并发出警告。
-        
-        更好的方案是使用 async with 上下文管理器，但 openai 库
-        目前不支持异步上下文管理器用于客户端初始化。
-        
-        参考 Home Assistant 官方 OpenAI 集成的做法：
-        https://github.com/home-assistant/core/blob/dev/homeassistant/components/openai_conversation/__init__.py
-        """
+        """获取或创建 AsyncOpenAI 客户端，延迟初始化."""
         if self._client is None:
             _LOGGER.debug("Creating AsyncOpenAI client")
             self._client = AsyncOpenAI(
@@ -85,8 +71,6 @@ class MimoASR(SpeechToTextEntity):
                 base_url=MIMO_API_BASE,
             )
         return self._client
-
-    # --- 以下为 STT 实体必需的属性 ---
 
     @property
     def supported_languages(self) -> list[str]:
@@ -100,15 +84,17 @@ class MimoASR(SpeechToTextEntity):
 
     @property
     def supported_formats(self) -> list[AudioFormats]:
-        """Return a list of supported formats."""
-        # STT 框架仅支持 WAV 和 OGG
-        # 参考: https://developers.home-assistant.io/docs/core/entity/stt/\#properties
-        return [AudioFormats.WAV]
+        """Return a list of supported formats.
+        Mimo supports mp3, flac, m4a, wav, ogg.
+        Home Assistant STT framework supports WAV and OGG.
+        """
+        return [AudioFormats.WAV, AudioFormats.OGG]
 
     @property
     def supported_codecs(self) -> list[AudioCodecs]:
         """Return a list of supported codecs."""
-        return [AudioCodecs.PCM]
+        # WAV uses PCM, OGG typically uses OPUS
+        return [AudioCodecs.PCM, AudioCodecs.OPUS]
 
     @property
     def supported_bit_rates(self) -> list[AudioBitRates]:
@@ -125,8 +111,6 @@ class MimoASR(SpeechToTextEntity):
         """Return a list of supported channels."""
         return [AudioChannels.CHANNEL_MONO]
 
-    # --- 核心方法：处理音频流 ---
-
     async def async_process_audio_stream(
         self, metadata: SpeechMetadata, stream: AsyncIterable[bytes]
     ) -> SpeechResult:
@@ -138,17 +122,16 @@ class MimoASR(SpeechToTextEntity):
             metadata.codec,
         )
 
-        # 检查语言是否支持
         if metadata.language not in SUPPORTED_LANGUAGES:
             _LOGGER.error("Unsupported language: %s", metadata.language)
             return SpeechResult("", SpeechResultState.ERROR)
 
-        # 收集音频流数据
+        # 收集音频数据
         audio_data = b""
         async for chunk in stream:
             audio_data += chunk
 
-        if len(audio_data) == 0:
+        if not audio_data:
             _LOGGER.error("Received empty audio stream.")
             return SpeechResult("", SpeechResultState.ERROR)
 
@@ -161,19 +144,24 @@ class MimoASR(SpeechToTextEntity):
             _LOGGER.error("Failed to base64 encode audio: %s", err)
             return SpeechResult("", SpeechResultState.ERROR)
 
-        # 确定 MIME 类型 - 只支持 WAV
-        mime_type = "audio/wav"
+        # 根据格式确定 MIME 类型
+        if metadata.format == AudioFormats.WAV:
+            mime_type = "audio/wav"
+        elif metadata.format == AudioFormats.OGG:
+            mime_type = "audio/ogg"
+        else:
+            _LOGGER.error("Unsupported format: %s", metadata.format)
+            return SpeechResult("", SpeechResultState.ERROR)
 
-        # 获取客户端（延迟初始化）
+        # 获取客户端
         client = self._get_client()
 
-        # 调用 Mimo ASR API
-        try:
-            # 语言代码映射：HA 使用 zh-CN，Mimo 使用 zh
-            lang = metadata.language
-            if lang == "zh-CN":
-                lang = "zh"
+        # 语言映射
+        lang = metadata.language
+        if lang == "zh-CN":
+            lang = "zh"
 
+        try:
             completion = await client.chat.completions.create(
                 model=MIMO_ASR_MODEL,
                 messages=[
@@ -196,7 +184,6 @@ class MimoASR(SpeechToTextEntity):
                 }
             )
 
-            # 解析结果
             if completion.choices and completion.choices[0].message.content:
                 result_text = completion.choices[0].message.content
                 _LOGGER.info("Speech recognition successful: %s", result_text)
