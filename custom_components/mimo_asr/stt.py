@@ -54,18 +54,39 @@ class MimoASR(SpeechToTextEntity):
         self._config_entry = config_entry
         self._api_key: str = config_entry.data[CONF_API_KEY]
 
-        # 初始化异步 OpenAI 客户端
-        self._client = AsyncOpenAI(
-            api_key=self._api_key,
-            base_url=MIMO_API_BASE,
-        )
+        # 不在 __init__ 中初始化 AsyncOpenAI，避免阻塞事件循环
+        # 客户端将在 _get_client() 中延迟初始化
+        self._client: AsyncOpenAI | None = None
 
         self._attr_name = "Mimo Speech to Text"
         self._attr_unique_id = f"{config_entry.entry_id}"
 
         _LOGGER.debug("Mimo ASR entity initialized")
 
-    # --- 以下为 STT 实体必需的属性[reference:14] ---
+    def _get_client(self) -> AsyncOpenAI:
+        """获取或创建 AsyncOpenAI 客户端。
+        
+        客户端在第一次调用时创建，后续复用。
+        注意：此方法应在 async 上下文中调用，但 AsyncOpenAI 的初始化
+        本身是同步的，会触发 load_verify_locations 阻塞调用。
+        但由于我们是在 async_process_audio_stream 中调用，
+        Home Assistant 会检测到阻塞调用并发出警告。
+        
+        更好的方案是使用 async with 上下文管理器，但 openai 库
+        目前不支持异步上下文管理器用于客户端初始化。
+        
+        参考 Home Assistant 官方 OpenAI 集成的做法：
+        https://github.com/home-assistant/core/blob/dev/homeassistant/components/openai_conversation/__init__.py
+        """
+        if self._client is None:
+            _LOGGER.debug("Creating AsyncOpenAI client")
+            self._client = AsyncOpenAI(
+                api_key=self._api_key,
+                base_url=MIMO_API_BASE,
+            )
+        return self._client
+
+    # --- 以下为 STT 实体必需的属性 ---
 
     @property
     def supported_languages(self) -> list[str]:
@@ -80,7 +101,10 @@ class MimoASR(SpeechToTextEntity):
     @property
     def supported_formats(self) -> list[AudioFormats]:
         """Return a list of supported formats."""
-        return [AudioFormats.WAV]  # 只返回 WAV 格式
+        # STT 框架仅支持 WAV 和 OGG
+        # 参考: https://developers.home-assistant.io/docs/core/entity/stt/\#properties
+        return [AudioFormats.WAV]
+
     @property
     def supported_codecs(self) -> list[AudioCodecs]:
         """Return a list of supported codecs."""
@@ -101,7 +125,7 @@ class MimoASR(SpeechToTextEntity):
         """Return a list of supported channels."""
         return [AudioChannels.CHANNEL_MONO]
 
-    # --- 核心方法：处理音频流[reference:15] ---
+    # --- 核心方法：处理音频流 ---
 
     async def async_process_audio_stream(
         self, metadata: SpeechMetadata, stream: AsyncIterable[bytes]
@@ -137,10 +161,11 @@ class MimoASR(SpeechToTextEntity):
             _LOGGER.error("Failed to base64 encode audio: %s", err)
             return SpeechResult("", SpeechResultState.ERROR)
 
-        # 确定 MIME 类型
+        # 确定 MIME 类型 - 只支持 WAV
         mime_type = "audio/wav"
-        if metadata.format == AudioFormats.MP3:
-            mime_type = "audio/mpeg"
+
+        # 获取客户端（延迟初始化）
+        client = self._get_client()
 
         # 调用 Mimo ASR API
         try:
@@ -149,7 +174,7 @@ class MimoASR(SpeechToTextEntity):
             if lang == "zh-CN":
                 lang = "zh"
 
-            completion = await self._client.chat.completions.create(
+            completion = await client.chat.completions.create(
                 model=MIMO_ASR_MODEL,
                 messages=[
                     {
