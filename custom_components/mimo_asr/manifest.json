@@ -2,11 +2,11 @@
   "domain": "mimo_asr",
   "name": "Mimo Speech-To-Text",
   "config_flow": true,
-  "version": "1.0.0",
+  "version": "1.0.1",
   "codeowners": ["@ly2199"],
   "documentation": "https://github.com/ly2199/ha_mimo_asr",
-  "iot_class": "cloud_push",
   "issue_tracker": "https://github.com/ly2199/ha_mimo_asr/issues",
+  "iot_class": "cloud_push",
   "requirements": ["openai>=1.0.0"],
   "dependencies": ["stt"],
   "after_dependencies": ["assist_pipeline"]
