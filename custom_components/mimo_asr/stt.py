@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import base64
 import logging
+import struct
 from collections.abc import AsyncIterable
 
 from openai import AsyncOpenAI
@@ -34,6 +35,33 @@ from .const import (
 _LOGGER = logging.getLogger(__name__)
 
 
+def create_wav_header(sample_rate: int, channels: int, bits_per_sample: int, data_size: int) -> bytes:
+    """生成标准 WAV 文件头 (44 字节)。"""
+    byte_rate = sample_rate * channels * bits_per_sample // 8
+    block_align = channels * bits_per_sample // 8
+    fmt_chunk_size = 16
+    audio_format = 1  # PCM
+
+    header = b""
+    # RIFF 块
+    header += b"RIFF"
+    header += struct.pack("<I", 36 + data_size)  # 总长度 (不包括 RIFF 和 size 字段)
+    header += b"WAVE"
+    # fmt 块
+    header += b"fmt "
+    header += struct.pack("<I", fmt_chunk_size)
+    header += struct.pack("<H", audio_format)
+    header += struct.pack("<H", channels)
+    header += struct.pack("<I", sample_rate)
+    header += struct.pack("<I", byte_rate)
+    header += struct.pack("<H", block_align)
+    header += struct.pack("<H", bits_per_sample)
+    # data 块
+    header += b"data"
+    header += struct.pack("<I", data_size)
+    return header
+
+
 async def async_setup_entry(
     hass: HomeAssistant,
     config_entry: ConfigEntry,
@@ -53,7 +81,6 @@ class MimoASR(SpeechToTextEntity):
         self._config_entry = config_entry
         self._api_key: str = config_entry.data[CONF_API_KEY]
 
-        # 客户端延迟初始化，使用 executor 避免阻塞事件循环
         self._client: AsyncOpenAI | None = None
 
         self._attr_name = "Mimo Speech to Text"
@@ -78,46 +105,35 @@ class MimoASR(SpeechToTextEntity):
 
     @property
     def supported_languages(self) -> list[str]:
-        """Return a list of supported languages."""
         return SUPPORTED_LANGUAGES
 
     @property
     def default_language(self) -> str:
-        """Return the default language."""
         return DEFAULT_LANGUAGE
 
     @property
     def supported_formats(self) -> list[AudioFormats]:
-        """Return a list of supported formats.
-        Mimo supports wav and mp3, but HA STT only supports WAV and OGG.
-        We only support WAV to ensure compatibility.
-        """
         return [AudioFormats.WAV]
 
     @property
     def supported_codecs(self) -> list[AudioCodecs]:
-        """Return a list of supported codecs."""
         return [AudioCodecs.PCM]
 
     @property
     def supported_bit_rates(self) -> list[AudioBitRates]:
-        """Return a list of supported bitrates."""
         return [AudioBitRates.BITRATE_16]
 
     @property
     def supported_sample_rates(self) -> list[AudioSampleRates]:
-        """Return a list of supported samplerates."""
         return [AudioSampleRates.SAMPLERATE_16000]
 
     @property
     def supported_channels(self) -> list[AudioChannels]:
-        """Return a list of supported channels."""
         return [AudioChannels.CHANNEL_MONO]
 
     async def async_process_audio_stream(
         self, metadata: SpeechMetadata, stream: AsyncIterable[bytes]
     ) -> SpeechResult:
-        """Process audio stream and send to Mimo ASR."""
         _LOGGER.debug(
             "Processing audio stream. Language: %s, Format: %s, Codec: %s",
             metadata.language,
@@ -125,21 +141,15 @@ class MimoASR(SpeechToTextEntity):
             metadata.codec,
         )
 
-        # 1. 语言检查
         if metadata.language not in SUPPORTED_LANGUAGES:
             _LOGGER.error("Unsupported language: %s", metadata.language)
             return SpeechResult("", SpeechResultState.ERROR)
 
-        # 2. 严格检查格式：仅支持 WAV
         if metadata.format != AudioFormats.WAV:
-            _LOGGER.error(
-                "Unsupported format: %s. Only WAV is supported. "
-                "Please ensure your audio source provides WAV format.",
-                metadata.format,
-            )
+            _LOGGER.error("Unsupported format: %s. Only WAV is supported.", metadata.format)
             return SpeechResult("", SpeechResultState.ERROR)
 
-        # 3. 收集音频数据
+        # 收集音频数据（实际为 PCM 裸流）
         audio_data = b""
         async for chunk in stream:
             audio_data += chunk
@@ -148,27 +158,31 @@ class MimoASR(SpeechToTextEntity):
             _LOGGER.error("Received empty audio stream.")
             return SpeechResult("", SpeechResultState.ERROR)
 
-        _LOGGER.debug("Collected %d bytes of audio data.", len(audio_data))
+        _LOGGER.debug("Collected %d bytes of PCM audio data.", len(audio_data))
 
-        # 4. Base64 编码
+        # 根据元数据添加 WAV 头部
+        sample_rate = metadata.sample_rate.value  # 16000
+        channels = 1  # 根据 supported_channels
+        bits_per_sample = 16  # 根据 supported_bit_rates
+
+        wav_header = create_wav_header(sample_rate, channels, bits_per_sample, len(audio_data))
+        wav_audio = wav_header + audio_data
+
+        _LOGGER.debug("Created WAV audio of %d bytes (header %d + data %d).",
+                      len(wav_audio), len(wav_header), len(audio_data))
+
         try:
-            audio_base64 = base64.b64encode(audio_data).decode("utf-8")
+            audio_base64 = base64.b64encode(wav_audio).decode("utf-8")
         except Exception as err:
             _LOGGER.error("Failed to base64 encode audio: %s", err)
             return SpeechResult("", SpeechResultState.ERROR)
 
-        # 5. 构造 Data URL（严格按照 Mimo 官方示例）
-        data_url = f"data:audio/wav;base64,{audio_base64}"
-
-        # 6. 获取客户端（非阻塞）
         client = await self._async_get_client()
 
-        # 7. 语言映射
         lang = metadata.language
         if lang == "zh-CN":
             lang = "zh"
 
-        # 8. 调用 Mimo API
         try:
             completion = await client.chat.completions.create(
                 model=MIMO_ASR_MODEL,
@@ -179,7 +193,8 @@ class MimoASR(SpeechToTextEntity):
                             {
                                 "type": "input_audio",
                                 "input_audio": {
-                                    "data": data_url
+                                    "data": audio_base64,
+                                    "format": "wav"
                                 }
                             }
                         ]
