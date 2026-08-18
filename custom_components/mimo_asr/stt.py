@@ -53,7 +53,7 @@ class MimoASR(SpeechToTextEntity):
         self._config_entry = config_entry
         self._api_key: str = config_entry.data[CONF_API_KEY]
 
-        # 延迟初始化客户端以避免阻塞事件循环
+        # 客户端延迟初始化，使用 executor 避免阻塞事件循环
         self._client: AsyncOpenAI | None = None
 
         self._attr_name = "Mimo Speech to Text"
@@ -61,14 +61,19 @@ class MimoASR(SpeechToTextEntity):
 
         _LOGGER.debug("Mimo ASR entity initialized")
 
-    def _get_client(self) -> AsyncOpenAI:
-        """获取或创建 AsyncOpenAI 客户端，延迟初始化."""
+    async def _async_get_client(self) -> AsyncOpenAI:
+        """异步获取客户端，在 executor 中创建以避免阻塞事件循环。"""
         if self._client is None:
-            _LOGGER.debug("Creating AsyncOpenAI client")
-            self._client = AsyncOpenAI(
-                api_key=self._api_key,
-                base_url=MIMO_API_BASE,
-            )
+            _LOGGER.debug("Creating AsyncOpenAI client in executor")
+            api_key = self._api_key
+
+            def _create_client():
+                return AsyncOpenAI(
+                    api_key=api_key,
+                    base_url=MIMO_API_BASE,
+                )
+
+            self._client = await self.hass.async_add_executor_job(_create_client)
         return self._client
 
     @property
@@ -120,16 +125,21 @@ class MimoASR(SpeechToTextEntity):
             metadata.codec,
         )
 
+        # 1. 语言检查
         if metadata.language not in SUPPORTED_LANGUAGES:
             _LOGGER.error("Unsupported language: %s", metadata.language)
             return SpeechResult("", SpeechResultState.ERROR)
 
-        # 只处理 WAV 格式
+        # 2. 严格检查格式：仅支持 WAV
         if metadata.format != AudioFormats.WAV:
-            _LOGGER.error("Unsupported format: %s. Only WAV is supported.", metadata.format)
+            _LOGGER.error(
+                "Unsupported format: %s. Only WAV is supported. "
+                "Please ensure your audio source provides WAV format.",
+                metadata.format,
+            )
             return SpeechResult("", SpeechResultState.ERROR)
 
-        # 收集音频数据
+        # 3. 收集音频数据
         audio_data = b""
         async for chunk in stream:
             audio_data += chunk
@@ -140,24 +150,25 @@ class MimoASR(SpeechToTextEntity):
 
         _LOGGER.debug("Collected %d bytes of audio data.", len(audio_data))
 
-        # Base64 编码
+        # 4. Base64 编码
         try:
             audio_base64 = base64.b64encode(audio_data).decode("utf-8")
         except Exception as err:
             _LOGGER.error("Failed to base64 encode audio: %s", err)
             return SpeechResult("", SpeechResultState.ERROR)
 
-        # 使用 Data URL 方式（官方文档示例）
-        mime_type = "audio/wav"
-        data_url = f"data:{mime_type};base64,{audio_base64}"
+        # 5. 构造 Data URL（严格按照 Mimo 官方示例）
+        data_url = f"data:audio/wav;base64,{audio_base64}"
 
-        client = self._get_client()
+        # 6. 获取客户端（非阻塞）
+        client = await self._async_get_client()
 
-        # 语言映射：HA 使用 zh-CN，Mimo 使用 zh
+        # 7. 语言映射
         lang = metadata.language
         if lang == "zh-CN":
             lang = "zh"
 
+        # 8. 调用 Mimo API
         try:
             completion = await client.chat.completions.create(
                 model=MIMO_ASR_MODEL,
