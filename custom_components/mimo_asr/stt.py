@@ -1,7 +1,6 @@
 """Support for Mimo speech to text service."""
 from __future__ import annotations
 
-import asyncio
 import base64
 import logging
 from collections.abc import AsyncIterable
@@ -85,16 +84,15 @@ class MimoASR(SpeechToTextEntity):
     @property
     def supported_formats(self) -> list[AudioFormats]:
         """Return a list of supported formats.
-        Mimo supports mp3, flac, m4a, wav, ogg.
-        Home Assistant STT framework supports WAV and OGG.
+        Mimo supports wav and mp3, but HA STT only supports WAV and OGG.
+        We only support WAV to ensure compatibility.
         """
-        return [AudioFormats.WAV, AudioFormats.OGG]
+        return [AudioFormats.WAV]
 
     @property
     def supported_codecs(self) -> list[AudioCodecs]:
         """Return a list of supported codecs."""
-        # WAV uses PCM, OGG typically uses OPUS
-        return [AudioCodecs.PCM, AudioCodecs.OPUS]
+        return [AudioCodecs.PCM]
 
     @property
     def supported_bit_rates(self) -> list[AudioBitRates]:
@@ -126,6 +124,11 @@ class MimoASR(SpeechToTextEntity):
             _LOGGER.error("Unsupported language: %s", metadata.language)
             return SpeechResult("", SpeechResultState.ERROR)
 
+        # 只处理 WAV 格式
+        if metadata.format != AudioFormats.WAV:
+            _LOGGER.error("Unsupported format: %s. Only WAV is supported.", metadata.format)
+            return SpeechResult("", SpeechResultState.ERROR)
+
         # 收集音频数据
         audio_data = b""
         async for chunk in stream:
@@ -144,19 +147,13 @@ class MimoASR(SpeechToTextEntity):
             _LOGGER.error("Failed to base64 encode audio: %s", err)
             return SpeechResult("", SpeechResultState.ERROR)
 
-        # 根据格式确定 MIME 类型
-        if metadata.format == AudioFormats.WAV:
-            mime_type = "audio/wav"
-        elif metadata.format == AudioFormats.OGG:
-            mime_type = "audio/ogg"
-        else:
-            _LOGGER.error("Unsupported format: %s", metadata.format)
-            return SpeechResult("", SpeechResultState.ERROR)
+        # 使用 Data URL 方式（官方文档示例）
+        mime_type = "audio/wav"
+        data_url = f"data:{mime_type};base64,{audio_base64}"
 
-        # 获取客户端
         client = self._get_client()
 
-        # 语言映射
+        # 语言映射：HA 使用 zh-CN，Mimo 使用 zh
         lang = metadata.language
         if lang == "zh-CN":
             lang = "zh"
@@ -171,7 +168,7 @@ class MimoASR(SpeechToTextEntity):
                             {
                                 "type": "input_audio",
                                 "input_audio": {
-                                    "data": f"data:{mime_type};base64,{audio_base64}"
+                                    "data": data_url
                                 }
                             }
                         ]
