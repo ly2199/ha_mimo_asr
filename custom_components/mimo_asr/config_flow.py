@@ -7,10 +7,23 @@ import logging
 
 from homeassistant import config_entries
 from homeassistant.data_entry_flow import FlowResult
-from homeassistant.core import callback
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
-from .const import DOMAIN, NAME, CONF_API_KEY, MIMO_API_BASE, MIMO_ASR_MODEL
+from .const import (
+    DOMAIN,
+    NAME,
+    CONF_API_KEY,
+    CONF_SILENCE_SECONDS,
+    CONF_REQUEST_TIMEOUT,
+    DEFAULT_SILENCE_SECONDS,
+    DEFAULT_REQUEST_TIMEOUT,
+    SILENCE_SECONDS_MIN,
+    SILENCE_SECONDS_MAX,
+    REQUEST_TIMEOUT_MIN,
+    REQUEST_TIMEOUT_MAX,
+    MIMO_API_BASE,
+    MIMO_ASR_MODEL,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -97,4 +110,61 @@ class ConfigFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
         return self.async_create_entry(
             title=NAME,
             data=user_input
+        )
+
+    @staticmethod
+    def async_get_options_flow(
+        config_entry: config_entries.ConfigEntry,
+    ) -> config_entries.OptionsFlow:
+        """Get the options flow for this handler."""
+        return MimoASROptionsFlow(config_entry)
+
+
+class MimoASROptionsFlow(config_entries.OptionsFlow):
+    """Handle options for Mimo ASR."""
+
+    def __init__(self, config_entry: config_entries.ConfigEntry) -> None:
+        """Initialize options flow."""
+        self._config_entry = config_entry
+
+    async def async_step_init(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
+        """Manage the options."""
+        if user_input is not None:
+            return self.async_create_entry(data=user_input)
+
+        options = self._config_entry.options
+        return self.async_show_form(
+            step_id="init",
+            data_schema=vol.Schema({
+                vol.Optional(
+                    CONF_SILENCE_SECONDS,
+                    default=float(options.get(
+                        CONF_SILENCE_SECONDS, DEFAULT_SILENCE_SECONDS
+                    )),
+                ): vol.All(
+                    vol.Coerce(float),
+                    vol.Range(
+                        min=SILENCE_SECONDS_MIN,
+                        max=SILENCE_SECONDS_MAX,
+                        min_included=True,
+                        max_included=True,
+                    ),
+                ),
+                vol.Optional(
+                    CONF_REQUEST_TIMEOUT,
+                    default=int(options.get(
+                        CONF_REQUEST_TIMEOUT, DEFAULT_REQUEST_TIMEOUT
+                    )),
+                ): vol.All(
+                    vol.Coerce(int),
+                    vol.Range(
+                        min=REQUEST_TIMEOUT_MIN,
+                        max=REQUEST_TIMEOUT_MAX,
+                        min_included=True,
+                        max_included=True,
+                    ),
+                ),
+            }),
         )

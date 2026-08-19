@@ -13,5 +13,17 @@
     "abort": {
       "single_instance_allowed": "只允许建立一个实例"
     }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "识别参数",
+        "description": "调整语音识别的结束时机与请求超时。",
+        "data": {
+          "silence_seconds": "结束静音时长（秒）",
+          "request_timeout": "API 请求超时（秒）"
+        }
+      }
+    }
   }
 }

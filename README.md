@@ -1,7 +1,7 @@
 # Mimo Speech-To-Text 集成 for Home Assistant
 
 [![hacs_badge](https://img.shields.io/badge/HACS-Custom-41BDF5.svg)](https://github.com/hacs/integration)
-[![ha_version](https://img.shields.io/badge/Home%20Assistant-2024.1+-blue.svg)](https://www.home-assistant.io/)
+[![ha_version](https://img.shields.io/badge/Home%20Assistant-2025.2+-blue.svg)](https://www.home-assistant.io/)
 [![GitHub release](https://img.shields.io/github/v/release/ly2199/ha_mimo_asr)](https://github.com/ly2199/ha_mimo_asr/releases)
 
 使用 Mimo ASR 服务为 Home Assistant 提供语音识别（STT）能力，让您的语音助手更智能、更精准。
@@ -54,17 +54,28 @@
 
 现在，当你说出语音指令时，HA 会使用 Mimo 进行识别。
 
+## 🎚️ 识别参数
+
+插件内置能量检测（VAD），会实时监听尾静音，**在检测到语音结束后立即调用 API**，而不是被动等待 Home Assistant 管道关闭音频流——即使你的拾音设备不提供 VAD 概率，识别也能在说完话后约半秒内结束。发送前会自动裁剪首尾静音，全程无语音时不消耗 API 额度。
+
+在 **设置 → 设备与服务 → Mimo Speech-To-Text → 配置** 中可调整：
+
+| 参数 | 默认值 | 说明 |
+|------|--------|------|
+| 结束静音时长 | 0.5 秒 | 语音后静音达到该时长即结束识别。调小响应更快但可能截断句中停顿；调大更稳妥但等待更久 |
+| API 请求超时 | 15 秒 | Mimo API 单次请求超时上限，防止管道卡死 |
+
 ## 🔧 支持参数
 
 | 项目 | 支持情况 |
 |------|----------|
 | 语言 | `zh`, `zh-CN`, `en` |
-| 音频格式 | WAV, MP3 |
+| 音频格式 | WAV |
 | 采样率 | 16 kHz |
 | 声道 | 单声道 |
 | 码率 | 16-bit PCM |
 
-> ⚠️ 注意：Home Assistant 默认会使用 Opus/OGG 格式，如果遇到兼容性问题，请确保你的音频源输出为 WAV 或 MP3。
+> ⚠️ 注意：Home Assistant 默认会使用 Opus/OGG 格式，本集成已声明仅支持 WAV/PCM，管道会自动转换，无需手动配置。
 
 ## ❓ 故障排除
 
@@ -79,7 +90,11 @@
 - 检查 `custom_components/mimo_asr` 目录结构是否正确。
 - 重启 HA 后重试。
 
-### 4. 获取更多调试日志
+### 4. 识别结果被截断或等待太久
+- 在集成配置中调整 **结束静音时长**：被截断则调大（如 0.8s），等待太久则调小（如 0.3s）。
+- 开启 debug 日志观察 VAD 行为（提前结束、裁剪帧范围）。
+
+### 5. 获取更多调试日志
 在 `configuration.yaml` 中添加：
 ```yaml
 logger:
